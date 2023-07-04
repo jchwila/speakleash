@@ -74,9 +74,19 @@ class WebRequester:
     @staticmethod
     def download_file(url, filepath):
         try:
-            response = WebRequester.session.get(url, stream=True)
-            response.raise_for_status()
+            response = requests.get(url, stream=True)
+            response.raise_for_status()  # Raise an exception for HTTP errors
+        except requests.exceptions.RequestException as e:
+            print(f"An error occurred while making the request: {e}")
+            return False
+    
+        try:
             total_size_in_bytes = int(response.headers.get('content-length', 0))
+        except (ValueError, TypeError):
+            print("An error occurred while calculating the file size")
+            return False
+    
+        try:
             block_size = 1024
             progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True)
             with open(filepath, 'wb') as file:
@@ -84,13 +94,11 @@ class WebRequester:
                     progress_bar.update(len(data))
                     file.write(data)
             progress_bar.close()
-            return total_size_in_bytes == progress_bar.n
-        except requests.exceptions.RequestException as e:
-            print(f"Error downloading file: {e}")
-            return False
         except IOError as e:
-            print(f"Error writing file: {e}")
+            print(f"An error occurred while writing the file: {e}")
             return False
+
+        return total_size_in_bytes == progress_bar.n
 
 class StructureDownloader:
     def __init__(self, replicate_dir):
