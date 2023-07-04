@@ -1,19 +1,16 @@
 import requests
 import json
-from tqdm import tqdm
 import os
-from lm_dataformat import Reader
 import hashlib
-from datetime import datetime
 import glob
 import tempfile
+from tqdm import tqdm
+from lm_dataformat import Reader
 
 class FileManager:
-
     @staticmethod
     def ensure_dir_exists(directory):
-        if not os.path.exists(directory):
-            os.makedirs(directory, exist_ok=True)
+        os.makedirs(directory, exist_ok=True)
 
     @staticmethod
     def load_json(file):
@@ -53,11 +50,12 @@ class FileManager:
             return False
 
 class WebRequester:
+    session = requests.Session()
 
     @staticmethod
     def get_json(url):
         try:
-            r = requests.get(url)
+            r = WebRequester.session.get(url)
             if r.ok:
                 return json.loads(r.text)
         except:
@@ -66,7 +64,7 @@ class WebRequester:
     @staticmethod
     def get_text(url, encoding='utf-8'):
         try:
-            r = requests.get(url)
+            r = WebRequester.session.get(url)
             r.encoding = encoding
             if r.ok:
                 return r.text
@@ -75,20 +73,26 @@ class WebRequester:
 
     @staticmethod
     def download_file(url, filepath):
-        response = requests.get(url, stream=True)
-        total_size_in_bytes = int(response.headers.get('content-length', 0))
-        block_size = 1024
-        progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True)
-        with open(filepath, 'wb') as file:
-            for data in response.iter_content(block_size):
-                progress_bar.update(len(data))
-                file.write(data)
-        progress_bar.close()
-        return total_size_in_bytes == progress_bar.n
+        try:
+            response = WebRequester.session.get(url, stream=True)
+            response.raise_for_status()
+            total_size_in_bytes = int(response.headers.get('content-length', 0))
+            block_size = 1024
+            progress_bar = tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True)
+            with open(filepath, 'wb') as file:
+                for data in response.iter_content(block_size):
+                    progress_bar.update(len(data))
+                    file.write(data)
+            progress_bar.close()
+            return total_size_in_bytes == progress_bar.n
+        except requests.exceptions.RequestException as e:
+            print(f"Error downloading file: {e}")
+            return False
+        except IOError as e:
+            print(f"Error writing file: {e}")
+            return False
 
-
-class StructureDownloader(object):
-
+class StructureDownloader:
     def __init__(self, replicate_dir):
         self.replicate_dir = replicate_dir
 
@@ -116,8 +120,7 @@ class StructureDownloader(object):
         FileManager.save_json(data, file)
         return data
 
-class CategoryManager(object):
-
+class CategoryManager:
     def __init__(self):
         self.temp_dir = os.path.join(tempfile.gettempdir(), "speakleash")
         FileManager.ensure_dir_exists(self.temp_dir)
@@ -159,8 +162,7 @@ class CategoryManager(object):
                     return True
         return False
 
-class Speakleash(object):
-
+class Speakleash:
     def __init__(self, replicate_dir, lang="pl"):
         self.replicate_dir = replicate_dir
         self.datasets = []
@@ -175,7 +177,7 @@ class Speakleash(object):
 
         names = self.structure_downloader.get_structure(url + structure_file)
 
-        if names:      
+        if names:
             for item in names:
                 if "name" in item:
                     self.datasets.append(SpeakleashDataset(item["name"], url, self.replicate_dir))
@@ -183,14 +185,14 @@ class Speakleash(object):
     def get(self, name):
         return next((d for d in self.datasets if d.name == name), None)
 
-class SpeakleashDataset(object):
-
+class SpeakleashDataset:
     def __init__(self, name, url, replicate_dir):
         self.url = url
         self.name = name
         self.replicate_dir = replicate_dir
         self.structure_downloader = StructureDownloader(self.replicate_dir)
         self.manifest = self._download_manifest()
+        self.jsonl_zst_file_size = self.manifest.get('file_size', 0)
 
     def _download_manifest(self):
         data = self.structure_downloader.get_structure(self.url + self.name + ".manifest")
@@ -289,10 +291,6 @@ class SpeakleashDataset(object):
         return self._get_stat('stopwords')
 
     @property
-    def jsonl_zst_file_size(self):
-        return self.manifest.get('file_size', 0)
-
-    @property
     def nouns(self):
         return self._get_stat('nouns')
 
@@ -317,7 +315,4 @@ class SpeakleashDataset(object):
         return self._get_stat('words')
 
     def __repr__(self):
-        return f"SpeakleashDataset([{self.name},{self.url},{self.characters}])"
-
-    def __str__(self):
-        return f"name: {self.name}, url: {self.url}, characters: {self.characters}"
+        return f"<SpeakleashDataset: {self.name}>"
